@@ -1,0 +1,42 @@
+"""
+Reproduce Figure 4: Memory Scalability.
+
+Run from repository root:
+
+    python experiments/figure4_memory_scalability.py
+"""
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT))
+
+from src.plotting import plot_memory_scalability
+
+
+def main():
+    datasets = [
+        "Iris",
+        "Wine",
+        "Breast\nCancer",
+        "Abalone",
+        "CDC\nDiabetes",
+        "MWS",
+    ]
+
+    knn_ram = [198.59, 197.75, 199.22, 184.79, 384.93, 2713.28]
+    bpknn_ram = [197.62, 195.24, 198.63, 181.86, 252.88, 689.47]
+
+    output_path = ROOT / "outputs" / "figure4_memory_scalability.png"
+
+    plot_memory_scalability(
+        datasets=datasets,
+        knn_ram=knn_ram,
+        bpknn_ram=bpknn_ram,
+        output_path=str(output_path),
+    )
+
+
+if __name__ == "__main__":
+    main()

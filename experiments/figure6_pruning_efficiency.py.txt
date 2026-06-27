@@ -1,0 +1,107 @@
+"""
+Reproduce Figure 6: Pruning Efficiency.
+
+Run from repository root:
+
+    python experiments/figure6_pruning_efficiency.py --dataset breast_cancer
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT))
+
+from src.bpknn import bpknn_predict
+from src.data_utils import load_sklearn_dataset, load_wdbc_from_csv, split_and_standardize
+from src.plotting import plot_pruning_efficiency
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="breast_cancer",
+        choices=["iris", "wine", "breast_cancer", "wdbc"],
+    )
+
+    parser.add_argument(
+        "--wdbc-path",
+        type=str,
+        default=None,
+    )
+
+    parser.add_argument(
+        "--k",
+        type=int,
+        default=5,
+    )
+
+    parser.add_argument(
+        "--lambda-filter",
+        type=float,
+        default=1.0,
+    )
+
+    parser.add_argument(
+        "--random-state",
+        type=int,
+        default=42,
+    )
+
+    return parser.parse_args()
+
+
+def load_dataset(dataset_name: str, wdbc_path: str = None):
+    if dataset_name == "wdbc":
+        if wdbc_path is None:
+            raise ValueError("Please provide --wdbc-path for the WDBC dataset.")
+        return load_wdbc_from_csv(wdbc_path)
+
+    return load_sklearn_dataset(dataset_name)
+
+
+def main():
+    args = parse_args()
+
+    X, y = load_dataset(args.dataset, args.wdbc_path)
+
+    X_train, X_test, y_train, y_test = split_and_standardize(
+        X,
+        y,
+        test_size=0.2,
+        random_state=args.random_state,
+        stratify=True,
+    )
+
+    print("Running BP-KNN pruning-efficiency analysis...")
+
+    bp_result = bpknn_predict(
+        X_train=X_train,
+        y_train=y_train,
+        X_test=X_test,
+        k=args.k,
+        metric="euclidean",
+        lambda_filter=args.lambda_filter,
+        anchor_offset=2,
+    )
+
+    print(f"Average pruning rate: {np.mean(bp_result.pruning_rates):.2f}%")
+    print(f"Average retained candidates: {np.mean(bp_result.retained_counts):.2f}")
+    print(f"Total candidates per query: {bp_result.total_candidates}")
+
+    output_path = ROOT / "outputs" / "figure6_pruning_efficiency.png"
+
+    plot_pruning_efficiency(
+        pruning_rates=bp_result.pruning_rates,
+        output_path=str(output_path),
+    )
+
+
+if __name__ == "__main__":
+    main()

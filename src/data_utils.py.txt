@@ -1,0 +1,99 @@
+"""
+Dataset loading and preprocessing utilities.
+
+Raw datasets are not redistributed in this repository. Users should download
+the public datasets from their original sources and provide local file paths.
+"""
+
+from typing import Tuple
+
+import numpy as np
+import pandas as pd
+
+from sklearn.datasets import load_iris, load_wine, load_breast_cancer
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+
+
+def split_and_standardize(
+    X: np.ndarray,
+    y: np.ndarray,
+    test_size: float = 0.2,
+    random_state: int = 42,
+    stratify: bool = True,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Split data into train/test sets and standardize features using training statistics.
+    """
+    stratify_labels = y if stratify else None
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=test_size,
+        random_state=random_state,
+        stratify=stratify_labels,
+    )
+
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
+
+    return X_train, X_test, y_train, y_test
+
+
+def load_sklearn_dataset(name: str) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Load small benchmark datasets available directly in scikit-learn.
+
+    Supported names:
+    - iris
+    - wine
+    - breast_cancer
+    """
+    name = name.lower()
+
+    if name == "iris":
+        data = load_iris()
+    elif name == "wine":
+        data = load_wine()
+    elif name in {"breast_cancer", "breast-cancer", "breast"}:
+        data = load_breast_cancer()
+    else:
+        raise ValueError(
+            "Unsupported sklearn dataset. Choose from: "
+            "'iris', 'wine', 'breast_cancer'."
+        )
+
+    X = np.asarray(data.data, dtype=float)
+    y = np.asarray(data.target, dtype=int)
+    return X, y
+
+
+def load_wdbc_from_csv(path: str) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Load the WDBC dataset from the original .data/.csv format.
+
+    Expected structure:
+    - column 0: sample ID
+    - column 1: class label
+    - columns 2 onward: numerical features
+
+    Parameters
+    ----------
+    path : str
+        Local path to the WDBC data file.
+
+    Returns
+    -------
+    X, y
+    """
+    df = pd.read_csv(path, header=None)
+
+    X = np.asarray(df.iloc[:, 2:], dtype=float)
+    y_raw = np.asarray(df.iloc[:, 1])
+
+    encoder = LabelEncoder()
+    y = encoder.fit_transform(y_raw)
+
+    return X, y

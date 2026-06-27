@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite the associated manuscript."
+title: "Bipolar Metric Spaces for Geometric Regularization in Distance-Based Learning"
+authors:
+  - family-names: "Mutlu"
+    given-names: "Gizen"
+  - family-names: "İnan Acı"
+    given-names: "Çiğdem"
+year: 2026
+repository-code: "[GitHub repository link]"
+license: "MIT"
+preferred-citation:
+  type: article
+  title: "Bipolar Metric Spaces for Geometric Regularization in Distance-Based Learning"
+  authors:
+    - family-names: "Mutlu"
+      given-names: "Gizen"
+    - family-names: "İnan Acı"
+      given-names: "Çiğdem"
+  year: 2026
+  journal: "Mathematics"
+  status: "submitted"

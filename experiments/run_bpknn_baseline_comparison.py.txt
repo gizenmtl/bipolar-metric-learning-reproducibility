@@ -1,0 +1,209 @@
+"""
+Run Standard KNN and BP-KNN comparison across distance metrics.
+
+This script is part of the reproducibility package for:
+"Bipolar Metric Spaces for Geometric Regularization in Distance-Based Learning"
+
+Run from repository root:
+
+    python experiments/run_bpknn_baseline_comparison.py --dataset breast_cancer
+    python experiments/run_bpknn_baseline_comparison.py --dataset wine
+    python experiments/run_bpknn_baseline_comparison.py --dataset iris
+
+For original WDBC file:
+
+    python experiments/run_bpknn_baseline_comparison.py --dataset wdbc --wdbc-path data/wdbc.data
+"""
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from sklearn.neighbors import KNeighborsClassifier
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT))
+
+from src.bpknn import bpknn_predict
+from src.data_utils import (
+    load_sklearn_dataset,
+    load_wdbc_from_csv,
+    split_and_standardize,
+)
+from src.evaluation import classification_metrics, measure_runtime_and_memory
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="breast_cancer",
+        choices=["iris", "wine", "breast_cancer", "wdbc"],
+        help="Dataset to use.",
+    )
+
+    parser.add_argument(
+        "--wdbc-path",
+        type=str,
+        default=None,
+        help="Path to original WDBC .data/.csv file if dataset='wdbc'.",
+    )
+
+    parser.add_argument(
+        "--k",
+        type=int,
+        default=5,
+        help="Number of nearest neighbors.",
+    )
+
+    parser.add_argument(
+        "--lambda-filter",
+        type=float,
+        default=1.0,
+        help="BP-KNN structural filtering parameter.",
+    )
+
+    parser.add_argument(
+        "--test-size",
+        type=float,
+        default=0.2,
+        help="Test set ratio.",
+    )
+
+    parser.add_argument(
+        "--random-state",
+        type=int,
+        default=42,
+        help="Random seed for train-test split.",
+    )
+
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="outputs/bpknn_baseline_comparison.csv",
+        help="Output CSV path.",
+    )
+
+    return parser.parse_args()
+
+
+def load_dataset(dataset_name: str, wdbc_path: str = None):
+    if dataset_name == "wdbc":
+        if wdbc_path is None:
+            raise ValueError("Please provide --wdbc-path for the WDBC dataset.")
+        return load_wdbc_from_csv(wdbc_path)
+
+    return load_sklearn_dataset(dataset_name)
+
+
+def run_standard_knn(X_train, y_train, X_test, k, metric, minkowski_p):
+    if metric == "minkowski":
+        model = KNeighborsClassifier(n_neighbors=k, metric="minkowski", p=minkowski_p)
+    else:
+        model = KNeighborsClassifier(n_neighbors=k, metric=metric)
+
+    model.fit(X_train, y_train)
+    return model.predict(X_test)
+
+
+def main():
+    args = parse_args()
+
+    X, y = load_dataset(args.dataset, args.wdbc_path)
+
+    X_train, X_test, y_train, y_test = split_and_standardize(
+        X,
+        y,
+        test_size=args.test_size,
+        random_state=args.random_state,
+        stratify=True,
+    )
+
+    metric_settings = [
+        ("euclidean", 2),
+        ("manhattan", 1),
+        ("chebyshev", 2),
+        ("minkowski", 3),
+    ]
+
+    rows = []
+
+    for metric, minkowski_p in metric_settings:
+        print(f"\nRunning metric: {metric}")
+
+        # Standard KNN
+        std_pred, std_time, std_ram = measure_runtime_and_memory(
+            run_standard_knn,
+            X_train,
+            y_train,
+            X_test,
+            args.k,
+            metric,
+            minkowski_p,
+        )
+
+        std_metrics = classification_metrics(y_test, std_pred)
+
+        rows.append(
+            {
+                "dataset": args.dataset,
+                "method": "Standard KNN",
+                "metric": metric,
+                "k": args.k,
+                "lambda_filter": np.nan,
+                "runtime_seconds": std_time,
+                "ram_delta_mb": std_ram,
+                "avg_pruning_rate": 0.0,
+                "avg_retained_candidates": X_train.shape[0],
+                **std_metrics,
+            }
+        )
+
+        # BP-KNN
+        bp_result, bp_time, bp_ram = measure_runtime_and_memory(
+            bpknn_predict,
+            X_train,
+            y_train,
+            X_test,
+            args.k,
+            metric,
+            minkowski_p,
+            args.lambda_filter,
+        )
+
+        bp_metrics = classification_metrics(y_test, bp_result.predictions)
+
+        rows.append(
+            {
+                "dataset": args.dataset,
+                "method": "BP-KNN",
+                "metric": metric,
+                "k": args.k,
+                "lambda_filter": args.lambda_filter,
+                "runtime_seconds": bp_time,
+                "ram_delta_mb": bp_ram,
+                "avg_pruning_rate": float(np.mean(bp_result.pruning_rates)),
+                "avg_retained_candidates": float(np.mean(bp_result.retained_counts)),
+                **bp_metrics,
+            }
+        )
+
+    result_df = pd.DataFrame(rows)
+
+    output_path = ROOT / args.output
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    result_df.to_csv(output_path, index=False)
+
+    print("\nResults:")
+    print(result_df)
+    print(f"\nSaved to: {output_path}")
+
+
+if __name__ == "__main__":
+    main()

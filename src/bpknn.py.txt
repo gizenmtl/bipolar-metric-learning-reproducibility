@@ -1,0 +1,232 @@
+"""
+BP-KNN implementation used for the reproducibility package of the manuscript:
+"Bipolar Metric Spaces for Geometric Regularization in Distance-Based Learning"
+
+This file provides a research-oriented implementation of the BP-KNN procedure
+reported in the manuscript. It is intended for reproducibility of the published
+experiments, not as a production-ready software package.
+"""
+
+from collections import Counter
+from dataclasses import dataclass
+from typing import Dict, List, Tuple, Optional
+
+import numpy as np
+
+
+def pairwise_distance_to_point(
+    X: np.ndarray,
+    y: np.ndarray,
+    metric: str = "euclidean",
+    p: int = 2,
+) -> np.ndarray:
+    """
+    Compute distances between each row of X and a single point y.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Candidate samples with shape (n_samples, n_features).
+    y : np.ndarray
+        Query point with shape (n_features,).
+    metric : str
+        Distance metric: "euclidean", "manhattan", "chebyshev", or "minkowski".
+    p : int
+        Power parameter for Minkowski distance.
+
+    Returns
+    -------
+    np.ndarray
+        Distance vector with shape (n_samples,).
+    """
+    diff = X - y
+
+    if metric == "euclidean":
+        return np.linalg.norm(diff, ord=2, axis=1)
+
+    if metric == "manhattan":
+        return np.linalg.norm(diff, ord=1, axis=1)
+
+    if metric == "chebyshev":
+        return np.linalg.norm(diff, ord=np.inf, axis=1)
+
+    if metric == "minkowski":
+        return np.linalg.norm(diff, ord=p, axis=1)
+
+    raise ValueError(
+        "Unsupported metric. Choose from: "
+        "'euclidean', 'manhattan', 'chebyshev', 'minkowski'."
+    )
+
+
+@dataclass
+class BPKNNResult:
+    """
+    Container for BP-KNN prediction results.
+    """
+    predictions: np.ndarray
+    pruning_rates: np.ndarray
+    pruned_counts: np.ndarray
+    retained_counts: np.ndarray
+    total_candidates: int
+
+
+def bpknn_predict_one(
+    y1_std: np.ndarray,
+    y2_std: np.ndarray,
+    y1_bip: np.ndarray,
+    y2_bip: np.ndarray,
+    X_train_std: np.ndarray,
+    X_train_bip: np.ndarray,
+    y_train: np.ndarray,
+    k: int = 5,
+    metric: str = "euclidean",
+    minkowski_p: int = 2,
+    lambda_filter: float = 1.0,
+    anchor_offset: int = 2,
+) -> Tuple[int, int, int]:
+    """
+    Predict the label of one query sample using BP-KNN.
+
+    The structural candidate filter is computed in the bipolar sign-space.
+    The final KNN ranking is computed only among retained candidates using
+    the selected numerical distance metric.
+
+    Returns
+    -------
+    Tuple[int, int, int]
+        predicted_label, pruned_count, total_candidate_count
+    """
+    n = X_train_std.shape[0]
+    secondary_indices = (np.arange(n) + anchor_offset) % n
+
+    # Final numerical distances used for the actual KNN ranking.
+    numerical_distances = pairwise_distance_to_point(
+        X_train_std,
+        y1_std,
+        metric=metric,
+        p=minkowski_p,
+    )
+
+    # BMS-inspired sign-space structural cost.
+    x1y1_b = pairwise_distance_to_point(
+        X_train_bip,
+        y1_bip,
+        metric=metric,
+        p=minkowski_p,
+    )
+
+    x2y1_b = pairwise_distance_to_point(
+        X_train_bip[secondary_indices],
+        y1_bip,
+        metric=metric,
+        p=minkowski_p,
+    )
+
+    x2y2_b = pairwise_distance_to_point(
+        X_train_bip[secondary_indices],
+        y2_bip,
+        metric=metric,
+        p=minkowski_p,
+    )
+
+    structural_cost = x1y1_b + x2y1_b + x2y2_b
+
+    threshold = np.mean(structural_cost) + lambda_filter * np.std(structural_cost)
+    retained_mask = structural_cost <= threshold
+
+    pruned_count = int(np.sum(~retained_mask))
+    retained_indices = np.where(retained_mask)[0]
+
+    # Safety fallback: if the structural filter removes all candidates,
+    # use the full candidate set.
+    if retained_indices.size == 0:
+        retained_indices = np.arange(n)
+
+    retained_distances = numerical_distances[retained_indices]
+    sorted_order = np.argsort(retained_distances)
+    neighbours = retained_indices[sorted_order[:k]]
+
+    neighbour_labels = y_train[neighbours]
+    predicted_label = Counter(neighbour_labels).most_common(1)[0][0]
+
+    return int(predicted_label), pruned_count, n
+
+
+def bpknn_predict(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_test: np.ndarray,
+    k: int = 5,
+    metric: str = "euclidean",
+    minkowski_p: int = 2,
+    lambda_filter: float = 1.0,
+    anchor_offset: int = 2,
+) -> BPKNNResult:
+    """
+    Predict all test samples using BP-KNN.
+
+    Parameters
+    ----------
+    X_train : np.ndarray
+        Standardized training samples.
+    y_train : np.ndarray
+        Training labels.
+    X_test : np.ndarray
+        Standardized test samples.
+    k : int
+        Number of nearest neighbors.
+    metric : str
+        Distance metric.
+    minkowski_p : int
+        Minkowski p value.
+    lambda_filter : float
+        Filtering parameter controlling structural filter permissiveness.
+    anchor_offset : int
+        Cyclic offset used for secondary query/training anchors.
+
+    Returns
+    -------
+    BPKNNResult
+        Predictions and pruning statistics.
+    """
+    X_train_bip = np.sign(X_train)
+    X_test_bip = np.sign(X_test)
+
+    m = X_test.shape[0]
+
+    predictions: List[int] = []
+    pruning_rates: List[float] = []
+    pruned_counts: List[int] = []
+    retained_counts: List[int] = []
+
+    for i in range(m):
+        j = (i + anchor_offset) % m
+
+        label, pruned_count, total_candidates = bpknn_predict_one(
+            y1_std=X_test[i],
+            y2_std=X_test[j],
+            y1_bip=X_test_bip[i],
+            y2_bip=X_test_bip[j],
+            X_train_std=X_train,
+            X_train_bip=X_train_bip,
+            y_train=y_train,
+            k=k,
+            metric=metric,
+            minkowski_p=minkowski_p,
+            lambda_filter=lambda_filter,
+            anchor_offset=anchor_offset,
+        )
+
+        predictions.append(label)
+        pruned_counts.append(pruned_count)
+        retained_counts.append(total_candidates - pruned_count)
+        pruning_rates.append((pruned_count / total_candidates) * 100.0)
+
+    return BPKNNResult(
+        predictions=np.asarray(predictions, dtype=int),
+        pruning_rates=np.asarray(pruning_rates, dtype=float),
+        pruned_counts=np.asarray(pruned_counts, dtype=int),
+        retained_counts=np.asarray(retained_counts, dtype=int),
+        total_candidates=int(X_train.shape[0]),
+    )

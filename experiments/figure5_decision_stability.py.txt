@@ -1,0 +1,134 @@
+"""
+Reproduce Figure 5: Decision Stability Analysis.
+
+Run from repository root:
+
+    python experiments/figure5_decision_stability.py --dataset breast_cancer
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+import numpy as np
+from sklearn.metrics import accuracy_score
+from sklearn.neighbors import KNeighborsClassifier
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.append(str(ROOT))
+
+from src.bpknn import bpknn_predict
+from src.data_utils import load_sklearn_dataset, load_wdbc_from_csv, split_and_standardize
+from src.plotting import plot_decision_stability
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="breast_cancer",
+        choices=["iris", "wine", "breast_cancer", "wdbc"],
+    )
+
+    parser.add_argument(
+        "--wdbc-path",
+        type=str,
+        default=None,
+    )
+
+    parser.add_argument(
+        "--k",
+        type=int,
+        default=5,
+    )
+
+    parser.add_argument(
+        "--lambda-filter",
+        type=float,
+        default=1.0,
+    )
+
+    parser.add_argument(
+        "--random-state",
+        type=int,
+        default=42,
+    )
+
+    return parser.parse_args()
+
+
+def load_dataset(dataset_name: str, wdbc_path: str = None):
+    if dataset_name == "wdbc":
+        if wdbc_path is None:
+            raise ValueError("Please provide --wdbc-path for the WDBC dataset.")
+        return load_wdbc_from_csv(wdbc_path)
+
+    return load_sklearn_dataset(dataset_name)
+
+
+def main():
+    args = parse_args()
+
+    rng = np.random.default_rng(args.random_state)
+
+    X, y = load_dataset(args.dataset, args.wdbc_path)
+
+    X_train, X_test, y_train, y_test = split_and_standardize(
+        X,
+        y,
+        test_size=0.2,
+        random_state=args.random_state,
+        stratify=True,
+    )
+
+    noise_levels = np.linspace(0, 2, 6)
+
+    standard_knn_acc = []
+    bpknn_acc = []
+
+    print("Running decision stability analysis...")
+
+    for sigma in noise_levels:
+        X_train_noisy = X_train + rng.normal(0, sigma, X_train.shape)
+
+        standard_model = KNeighborsClassifier(
+            n_neighbors=args.k,
+            metric="euclidean",
+        )
+        standard_model.fit(X_train_noisy, y_train)
+        standard_preds = standard_model.predict(X_test)
+
+        standard_knn_acc.append(accuracy_score(y_test, standard_preds))
+
+        bp_result = bpknn_predict(
+            X_train=X_train_noisy,
+            y_train=y_train,
+            X_test=X_test,
+            k=args.k,
+            metric="euclidean",
+            lambda_filter=args.lambda_filter,
+            anchor_offset=2,
+        )
+
+        bpknn_acc.append(accuracy_score(y_test, bp_result.predictions))
+
+        print(
+            f"Noise sigma={sigma:.2f} | "
+            f"KNN Acc={standard_knn_acc[-1]:.4f} | "
+            f"BP-KNN Acc={bpknn_acc[-1]:.4f}"
+        )
+
+    output_path = ROOT / "outputs" / "figure5_decision_stability.png"
+
+    plot_decision_stability(
+        noise_levels=noise_levels,
+        standard_knn_acc=standard_knn_acc,
+        bpknn_acc=bpknn_acc,
+        output_path=str(output_path),
+    )
+
+
+if __name__ == "__main__":
+    main()

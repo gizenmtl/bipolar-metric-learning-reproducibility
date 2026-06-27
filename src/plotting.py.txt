@@ -1,0 +1,81 @@
+"""
+Evaluation utilities for BP-KNN reproducibility experiments.
+"""
+
+import os
+import time
+from typing import Any, Callable, Dict, Tuple
+
+import numpy as np
+import psutil
+
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
+from sklearn.preprocessing import label_binarize
+
+
+def classification_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+) -> Dict[str, float]:
+    """
+    Compute classification metrics used in the manuscript.
+
+    ROC-AUC is computed using binarized predicted labels. This follows the
+    hard-label evaluation setting used in the reproducibility scripts.
+    """
+    metrics = {
+        "accuracy": accuracy_score(y_true, y_pred),
+        "f1_macro": f1_score(y_true, y_pred, average="macro"),
+        "f1_weighted": f1_score(y_true, y_pred, average="weighted"),
+        "f1_micro": f1_score(y_true, y_pred, average="micro"),
+    }
+
+    classes = np.unique(y_true)
+
+    try:
+        y_pred_bin = label_binarize(y_pred, classes=classes)
+
+        if len(classes) == 2:
+            metrics["roc_auc"] = roc_auc_score(y_true, y_pred_bin)
+        else:
+            metrics["roc_auc"] = roc_auc_score(
+                y_true,
+                y_pred_bin,
+                multi_class="ovr",
+            )
+    except Exception:
+        metrics["roc_auc"] = np.nan
+
+    return metrics
+
+
+def measure_runtime_and_memory(
+    func: Callable[..., Any],
+    *args: Any,
+    **kwargs: Any,
+) -> Tuple[Any, float, float]:
+    """
+    Run a function and measure elapsed wall-clock time and RAM difference.
+
+    Returns
+    -------
+    result : Any
+        Function output.
+    elapsed_time : float
+        Runtime in seconds.
+    memory_delta_mb : float
+        Difference in resident memory usage in MB.
+    """
+    process = psutil.Process(os.getpid())
+
+    mem_before = process.memory_info().rss / (1024 ** 2)
+    start_time = time.perf_counter()
+
+    result = func(*args, **kwargs)
+
+    elapsed_time = time.perf_counter() - start_time
+    mem_after = process.memory_info().rss / (1024 ** 2)
+
+    memory_delta_mb = mem_after - mem_before
+
+    return result, elapsed_time, memory_delta_mb
