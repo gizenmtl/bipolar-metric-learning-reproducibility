@@ -14,6 +14,8 @@ The repository includes:
 
 - BP-KNN implementation with a bipolar sign-space structural filter
 - Standard KNN baseline comparison scripts
+- BP-K-means implementation with a BMS-inspired assignment feasibility filter
+- Standard K-means baseline comparison script
 - Euclidean, Manhattan, Chebyshev, and Minkowski distance options
 - Accuracy, F1-score, ROC-AUC, runtime, and memory evaluation utilities
 - Figure 4 memory scalability script
@@ -29,12 +31,14 @@ Future extensions, optimized variants, and ongoing development versions are main
 ```text
 src/
   bpknn.py
+  bpkmeans.py
   data_utils.py
   evaluation.py
   plotting.py
 
 experiments/
   run_bpknn_baseline_comparison.py
+  run_bpkmeans_experiment.py
   figure4_memory_scalability.py
   figure5_decision_stability.py
   figure6_pruning_efficiency.py
